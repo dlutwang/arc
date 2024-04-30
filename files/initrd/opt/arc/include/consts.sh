@@ -1,17 +1,17 @@
 
-ARC_VERSION="23.1.1"
+ARC_VERSION="24.1.1"
 ARC_TITLE="Arc ${ARC_VERSION}"
 
 # Define paths
 PART1_PATH="/mnt/p1"
 PART2_PATH="/mnt/p2"
 PART3_PATH="/mnt/p3"
-DSMROOT_PATH="/mnt/dsmroot"
 TMP_PATH="/tmp"
 
 UNTAR_PAT_PATH="${TMP_PATH}/DSM"
 RAMDISK_PATH="${TMP_PATH}/ramdisk"
 LOG_FILE="${TMP_PATH}/log.txt"
+UPLOAD_PATH="${TMP_PATH}/upload"
 
 USER_CONFIG_FILE="${PART1_PATH}/user-config.yml"
 GRUB_PATH="${PART1_PATH}/boot/grub"
@@ -29,6 +29,7 @@ MODULES_PATH="${PART3_PATH}/modules"
 MODEL_CONFIG_PATH="${PART3_PATH}/configs"
 PATCH_PATH="${PART3_PATH}/patches"
 LKM_PATH="${PART3_PATH}/lkms"
+CUSTOM_PATH="${PART3_PATH}/custom"
 USER_UP_PATH="${PART3_PATH}/users"
 BACKUPDIR="${PART3_PATH}/backup"
 BB_USER_CONFIG_FILE="${BACKUPDIR}/user-config.yml"

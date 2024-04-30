@@ -1,17 +1,17 @@
 ---
 name: Bug report
-about: Create a report to help us improve
+about: Create a Bug Report
 title: ''
 labels: bug
 assignees: ''
 
 ---
 
-**Describe the bug**
-A clear and concise description of what the bug is.
+**Describe the Bug**
+First read Wiki to find a Solution. If you can't find a Solution, provide a clear and concise description of what the bug is.
 
 **Screenshots**
-If applicable, add screenshots from Arc - Sysinfo menu.
+Actual Screenshot from Systeminfo (Config Mode - Sysinfo) or use new "Full Sysinfo - Upload" Function provide the Code!!! <- IMPORTANT
 
-**Additional context**
-Add any other context about the problem here.
+**Hardware**
+Add your Hardware Informations here. CPU / Board / Networkcontroller / Storagecontroller / ...

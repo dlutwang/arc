@@ -35,7 +35,7 @@ function readModelArray() {
 ###############################################################################
 # Just show error message and dies
 function die() {
-  echo -e "\033[1;41m$*\033[0m"
+  echo -e "\033[1;41m$@\033[0m"
   exit 1
 }
 
@@ -72,9 +72,9 @@ function generateRandomLetter() {
 ###############################################################################
 # Generate a random digit (0-9A-Z)
 function generateRandomValue() {
-	 for i in 0 1 2 3 4 5 6 7 8 9 A B C D E F G H J K L M N P Q R S T V W X Y Z; do
-     echo $i
-	 done | sort -R | tail -1
+  for i in 0 1 2 3 4 5 6 7 8 9 A B C D E F G H J K L M N P Q R S T V W X Y Z; do
+    echo ${i}
+  done | sort -R | tail -1
 }
 
 ###############################################################################
@@ -85,12 +85,12 @@ function generateSerial() {
   SERIAL="$(readModelArray "${1}" "serial.prefix" | sort -R | tail -1)"
   SERIAL+=$(readModelKey "${1}" "serial.middle")
   case "$(readModelKey "${1}" "serial.suffix")" in
-    numeric)
-      SERIAL+=$(random)
-      ;;
-    alpha)
-      SERIAL+=$(generateRandomLetter)$(generateRandomValue)$(generateRandomValue)$(generateRandomValue)$(generateRandomValue)$(generateRandomLetter)
-      ;;
+  numeric)
+    SERIAL+=$(random)
+    ;;
+  alpha)
+    SERIAL+=$(generateRandomLetter)$(generateRandomValue)$(generateRandomValue)$(generateRandomValue)$(generateRandomValue)$(generateRandomLetter)
+    ;;
   esac
   echo ${SERIAL}
 }
@@ -102,12 +102,17 @@ function generateSerial() {
 # Returns serial number
 function generateMacAddress() {
   PRE="$(readModelArray "${1}" "serial.macpre")"
-  SUF="$(printf '%02x%02x%02x' $((${RANDOM} % 256)) $((${RANDOM} % 256)) $((${RANDOM} % 256)))"
+  KEY="$((${RANDOM} % 256)) $((${RANDOM} % 256)) $((${RANDOM} % 256))"
+  SUF="$(printf '%02x%02x%02x' ${KEY})"
   NUM=${2:-1}
+  MACS=""
   for I in $(seq 1 ${NUM}); do
-    printf '%06x%06x' $((0x${PRE:-"001132"})) $(($((0x${SUF})) + ${I}))
-    [ ${I} -lt ${NUM} ] && printf ' '
+    MACKEY="$((0x${PRE:-001132})) $(($((0x${SUF})) + ${I}))"
+    MACS+="$(printf '%06x%06x' ${MACKEY})"
+    [ ${I} -lt ${NUM} ] && MACS+=" "
   done
+  echo "${MACS}"
+  return 0
 }
 
 ###############################################################################
@@ -122,19 +127,16 @@ function validateSerial() {
   P=${2:4:3}
   L=${#2}
   if [ ${L} -ne 13 ]; then
-    echo 0
-    return
+    return 0
   fi
   echo "${PREFIX}" | grep -q "${S}"
   if [ $? -eq 1 ]; then
-    echo 0
-    return
+    return 0
   fi
   if [ "${MIDDLE}" != "${P}" ]; then
-    echo 0
-    return
+    return 0
   fi
-  echo 1
+  return 1
 }
 
 ###############################################################################
@@ -185,71 +187,14 @@ function _set_conf_kv() {
 }
 
 ###############################################################################
-# get bus of disk
-# 1 - device path
-function getBus() {
-  BUS=""
-  # usb/ata(sata/ide)/scsi
-  [ -z "${BUS}" ] && BUS=$(udevadm info --query property --name "${1}" 2>/dev/null | grep ID_BUS | cut -d= -f2 | sed 's/ata/sata/')
-  # usb/sata(sata/ide)/nvme
-  [ -z "${BUS}" ] && BUS=$(lsblk -dpno KNAME,TRAN 2>/dev/null | grep "${1} " | awk '{print $2}')
-  # usb/scsi(sata/ide)/virtio(scsi/virtio)/mmc/nvme
-  [ -z "${BUS}" ] && BUS=$(lsblk -dpno KNAME,SUBSYSTEMS 2>/dev/null | grep "${1} " | awk -F':' '{print $(NF-1)}' | sed 's/_host//')
-  echo "${BUS}"
-}
-
-###############################################################################
-# get IP
-# 1 - ethN
-function getIP() {
-  IP=""
-  if [[ -n "${1}" && -d "/sys/class/net/${1}" ]]; then
-    IP=$(ip route show dev ${1} 2>/dev/null | sed -n 's/.* via .* src \(.*\)  metric .*/\1/p')
-    [ -z "${IP}" ] && IP=$(ip addr show ${1} | grep -E "inet .* eth" | awk '{print $2}' | cut -f1 -d'/' | head -1)
-  else
-    IP=$(ip route show 2>/dev/null | sed -n 's/.* via .* src \(.*\)  metric .*/\1/p' | head -1)
-    [ -z "${IP}" ] && IP=$(ip addr show | grep -E "inet .* eth" | awk '{print $2}' | cut -f1 -d'/' | head -1)
-  fi
-  echo "${IP}"
-}
-
-###############################################################################
-# Find and mount the DSM root filesystem
-# (based on pocopico's TCRP code)
-function findAndMountDSMRoot() {
-  [ $(mount | grep -i "${DSMROOT_PATH}" | wc -l) -gt 0 ] && return 0
-  dsmrootdisk="$(blkid | grep -i linux_raid_member | grep -E "/dev/.*1:" | head -1 | awk -F ":" '{print $1}')"
-  [ -z "${dsmrootdisk}" ] && return 1
-  [ ! -d "${DSMROOT_PATH}" ] && mkdir -p "${DSMROOT_PATH}"
-  [ $(mount | grep -i "${DSMROOT_PATH}" | wc -l) -eq 0 ] && mount -t ext4 "${dsmrootdisk}" "${DSMROOT_PATH}"
-  if [ $(mount | grep -i "${DSMROOT_PATH}" | wc -l) -eq 0 ]; then
-    echo "Failed to mount"
-    return 1
-  fi
-  return 0
-}
-
-###############################################################################
-# Convert Netmask eq. 255.255.255.0 to /24
-# 1 - Netmask
-function convert_netmask() {
-  bits=0
-  for octet in $(echo $1| sed 's/\./ /g'); do 
-      binbits=$(echo "obase=2; ibase=10; ${octet}"| bc | sed 's/0//g') 
-      bits=$((${bits} + ${#binbits}))
-  done
-  echo "${bits}"
-}
-
-###############################################################################
 # sort netif name
 # @1 -mac1,mac2,mac3...
 function _sort_netif() {
   ETHLIST=""
-  ETHX=$(ls /sys/class/net/ | grep eth) # real network cards list
+  ETHX=$(ls /sys/class/net/ 2>/dev/null | grep eth) # real network cards list
   for ETH in ${ETHX}; do
-    MAC="$(cat /sys/class/net/${ETH}/address | sed 's/://g' | tr '[:upper:]' '[:lower:]')"
-    BUS=$(ethtool -i ${ETH} | grep bus-info | awk '{print $2}')
+    MAC="$(cat /sys/class/net/${ETH}/address 2>/dev/null | sed 's/://g' | tr '[:upper:]' '[:lower:]')"
+    BUS=$(ethtool -i ${ETH} 2>/dev/null | grep bus-info | awk '{print $2}')
     ETHLIST="${ETHLIST}${BUS} ${MAC} ${ETH}\n"
   done
 
@@ -285,7 +230,7 @@ EOF
     [ ${IDX} -ge $(wc -l <${TMP_PATH}/ethlist) ] && break
     ETH=$(cat ${TMP_PATH}/ethlist | sed -n "$((${IDX} + 1))p" | awk '{print $3}')
     # echo "ETH: ${ETH}"
-    if [[ -n "${ETH}" && ! "${ETH}" = "eth${IDX}" ]]; then
+    if [ -n "${ETH}" ] && [ ! "${ETH}" = "eth${IDX}" ]; then
       # echo "change ${ETH} <=> eth${IDX}"
       ip link set dev eth${IDX} down
       ip link set dev ${ETH} down
@@ -306,6 +251,77 @@ EOF
   done
 
   rm -f ${TMP_PATH}/ethlist
+  return 0
+}
+
+###############################################################################
+# get bus of disk
+# 1 - device path
+function getBus() {
+  BUS=""
+  # usb/ata(sata/ide)/scsi
+  [ -z "${BUS}" ] && BUS=$(udevadm info --query property --name "${1}" 2>/dev/null | grep ID_BUS | cut -d= -f2 | sed 's/ata/sata/')
+  # usb/sata(sata/ide)/nvme
+  [ -z "${BUS}" ] && BUS=$(lsblk -dpno KNAME,TRAN 2>/dev/null | grep "${1} " | awk '{print $2}') #Spaces are intentional
+  # usb/scsi(sata/ide)/virtio(scsi/virtio)/mmc/nvme
+  [ -z "${BUS}" ] && BUS=$(lsblk -dpno KNAME,SUBSYSTEMS 2>/dev/null | grep "${1} " | awk -F':' '{print $(NF-1)}' | sed 's/_host//') #Spaces are intentional
+  echo "${BUS}"
+  return 0
+}
+
+###############################################################################
+# get IP
+# 1 - ethN
+function getIP() {
+  IP=""
+  if [ -n "${1}" -a -d "/sys/class/net/${1}" ]; then
+    IP=$(ip route show dev ${1} 2>/dev/null | sed -n 's/.* via .* src \(.*\)  metric .*/\1/p')
+    [ -z "${IP}" ] && IP=$(ip addr show ${1} scope global 2>/dev/null | grep -E "inet .* eth" | awk '{print $2}' | cut -f1 -d'/' | head -1)
+  else
+    IP=$(ip route show 2>/dev/null | sed -n 's/.* via .* src \(.*\)  metric .*/\1/p' | head -1)
+    [ -z "${IP}" ] && IP=$(ip addr show scope global 2>/dev/null | grep -E "inet .* eth" | awk '{print $2}' | cut -f1 -d'/' | head -1)
+  fi
+  echo "${IP}"
+  return 0
+}
+
+###############################################################################
+# get logo of model
+# 1 - model
+function getLogo() {
+  MODEL="${1}"
+  rm -f "${PART3_PATH}/logo.png"
+  STATUS=$(curl -skL -m 10 -w "%{http_code}" "https://www.synology.com/api/products/getPhoto?product=${MODEL/+/%2B}&type=img_s&sort=0" -o "${PART3_PATH}/logo.png")
+  if [ $? -ne 0 -o ${STATUS:-0} -ne 200 -o ! -f "${PART3_PATH}/logo.png" ]; then
+    rm -f "${PART3_PATH}/logo.png"
+    return 1
+  fi
+  convert -rotate 180 "${PART3_PATH}/logo.png" "${PART3_PATH}/logo.png" 2>/dev/null
+  magick montage "${PART3_PATH}/logo.png" -background 'none' -tile '3x3' -geometry '350x210' "${PART3_PATH}/logo.png" 2>/dev/null
+  convert -rotate 180 "${PART3_PATH}/logo.png" "${PART3_PATH}/logo.png" 2>/dev/null
+  return 0
+}
+
+###############################################################################
+# Find and mount the DSM root filesystem
+function findDSMRoot() {
+  DSMROOTS=""
+  [ -z "${DSMROOTS}" ] && DSMROOTS="$(mdadm --detail --scan 2>/dev/null | grep -E "name=SynologyNAS:0|name=DiskStation:0|name=SynologyNVR:0|name=BeeStation:0" | awk '{print $2}' | uniq)"
+  [ -z "${DSMROOTS}" ] && DSMROOTS="$(lsblk -pno KNAME,PARTN,FSTYPE,FSVER,LABEL | grep -E "sd[a-z]{1,2}1" | grep -w "linux_raid_member" | grep "0.9" | awk '{print $1}')"
+  echo "${DSMROOTS}"
+  return 0
+}
+
+###############################################################################
+# Convert Netmask eq. 255.255.255.0 to /24
+# 1 - Netmask
+function convert_netmask() {
+  bits=0
+  for octet in $(echo $1| sed 's/\./ /g'); do 
+      binbits=$(echo "obase=2; ibase=10; ${octet}"| bc | sed 's/0//g') 
+      bits=$((${bits} + ${#binbits}))
+  done
+  echo "${bits}"
 }
 
 ###############################################################################
@@ -328,49 +344,51 @@ function livepatch() {
     writeConfigKey "ramdisk-hash" "${RAMDISK_HASH_CUR}" "${USER_CONFIG_FILE}"
     FAIL=0
   fi
-  # Looking for Update
-  if [ ${FAIL} -eq 1 ]; then
-    # Update Configs
-    TAG="$(curl --insecure -s https://api.github.com/repos/AuxXxilium/arc-configs/releases/latest | grep "tag_name" | awk '{print substr($2, 2, length($2)-3)}')"
-    if [[ $? -ne 0 || -z "${TAG}" ]]; then
-      return 1
-    fi
-    STATUS=$(curl --insecure -s -w "%{http_code}" -L "https://github.com/AuxXxilium/arc-configs/releases/download/${TAG}/configs.zip" -o "${TMP_PATH}/configs.zip")
-    if [[ $? -ne 0 || ${STATUS} -ne 200 ]]; then
-      return 1
-    fi
-    rm -rf "${MODEL_CONFIG_PATH}"
-    mkdir -p "${MODEL_CONFIG_PATH}"
-    unzip -oq "${TMP_PATH}/configs.zip" -d "${MODEL_CONFIG_PATH}" >/dev/null 2>&1
-    rm -f "${TMP_PATH}/configs.zip"
-    # Update Patches
-    TAG="$(curl --insecure -s https://api.github.com/repos/AuxXxilium/arc-patches/releases/latest | grep "tag_name" | awk '{print substr($2, 2, length($2)-3)}')"
-    if [[ $? -ne 0 || -z "${TAG}" ]]; then
-      return 1
-    fi
-    STATUS=$(curl --insecure -s -w "%{http_code}" -L "https://github.com/AuxXxilium/arc-patches/releases/download/${TAG}/patches.zip" -o "${TMP_PATH}/patches.zip")
-    if [[ $? -ne 0 || ${STATUS} -ne 200 ]]; then
-      return 1
-    fi
-    rm -rf "${PATCH_PATH}"
-    mkdir -p "${PATCH_PATH}"
-    unzip -oq "${TMP_PATH}/patches.zip" -d "${PATCH_PATH}" >/dev/null 2>&1
-    rm -f "${TMP_PATH}/patches.zip"
-    # Patch zImage
-    if ! ${ARC_PATH}/zimage-patch.sh; then
-      FAIL=1
-    else
-      ZIMAGE_HASH_CUR="$(sha256sum "${ORI_ZIMAGE_FILE}" | awk '{print $1}')"
-      writeConfigKey "zimage-hash" "${ZIMAGE_HASH_CUR}" "${USER_CONFIG_FILE}"
-      FAIL=0
-    fi
-    # Patch Ramdisk
-    if ! ${ARC_PATH}/ramdisk-patch.sh; then
-      FAIL=1
-    else
-      RAMDISK_HASH_CUR="$(sha256sum "${ORI_RDGZ_FILE}" | awk '{print $1}')"
-      writeConfigKey "ramdisk-hash" "${RAMDISK_HASH_CUR}" "${USER_CONFIG_FILE}"
-      FAIL=0
+  if [ "${OFFLINE}" = "false" ]; then
+    # Looking for Update
+    if [ ${FAIL} -eq 1 ]; then
+      # Update Configs
+      TAG="$(curl --insecure -m 5 -s https://api.github.com/repos/AuxXxilium/arc-configs/releases/latest | grep "tag_name" | awk '{print substr($2, 2, length($2)-3)}')"
+      if [[ $? -ne 0 || -z "${TAG}" ]]; then
+        return 1
+      fi
+      STATUS=$(curl --insecure -s -w "%{http_code}" -L "https://github.com/AuxXxilium/arc-configs/releases/download/${TAG}/configs.zip" -o "${TMP_PATH}/configs.zip")
+      if [[ $? -ne 0 || ${STATUS} -ne 200 ]]; then
+        return 1
+      fi
+      rm -rf "${MODEL_CONFIG_PATH}"
+      mkdir -p "${MODEL_CONFIG_PATH}"
+      unzip -oq "${TMP_PATH}/configs.zip" -d "${MODEL_CONFIG_PATH}" >/dev/null 2>&1
+      rm -f "${TMP_PATH}/configs.zip"
+      # Update Patches
+      TAG="$(curl --insecure -m 5 -s https://api.github.com/repos/AuxXxilium/arc-patches/releases/latest | grep "tag_name" | awk '{print substr($2, 2, length($2)-3)}')"
+      if [[ $? -ne 0 || -z "${TAG}" ]]; then
+        return 1
+      fi
+      STATUS=$(curl --insecure -s -w "%{http_code}" -L "https://github.com/AuxXxilium/arc-patches/releases/download/${TAG}/patches.zip" -o "${TMP_PATH}/patches.zip")
+      if [[ $? -ne 0 || ${STATUS} -ne 200 ]]; then
+        return 1
+      fi
+      rm -rf "${PATCH_PATH}"
+      mkdir -p "${PATCH_PATH}"
+      unzip -oq "${TMP_PATH}/patches.zip" -d "${PATCH_PATH}" >/dev/null 2>&1
+      rm -f "${TMP_PATH}/patches.zip"
+      # Patch zImage
+      if ! ${ARC_PATH}/zimage-patch.sh; then
+        FAIL=1
+      else
+        ZIMAGE_HASH_CUR="$(sha256sum "${ORI_ZIMAGE_FILE}" | awk '{print $1}')"
+        writeConfigKey "zimage-hash" "${ZIMAGE_HASH_CUR}" "${USER_CONFIG_FILE}"
+        FAIL=0
+      fi
+      # Patch Ramdisk
+      if ! ${ARC_PATH}/ramdisk-patch.sh; then
+        FAIL=1
+      else
+        RAMDISK_HASH_CUR="$(sha256sum "${ORI_RDGZ_FILE}" | awk '{print $1}')"
+        writeConfigKey "ramdisk-hash" "${RAMDISK_HASH_CUR}" "${USER_CONFIG_FILE}"
+        FAIL=0
+      fi
     fi
   fi
   if [ ${FAIL} -eq 1 ]; then
@@ -387,7 +405,9 @@ function livepatch() {
 # Rebooting
 # (based on pocopico's TCRP code)
 function rebootTo() {
-  [[ "${1}" != "junior" && "${1}" != "config" ]] && exit 1
+  MODES="config recovery junior automated update"
+  [ -z "${1}" ] && exit 1
+  if ! echo "${MODES}" | grep -qw "${1}"; then exit 1; fi
   # echo "Rebooting to ${1} mode"
   GRUBPATH="$(dirname $(find ${BOOTLOADER_PATH}/ -name grub.cfg | head -1))"
   ENVFILE="${GRUBPATH}/grubenv"

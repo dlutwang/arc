@@ -14,6 +14,10 @@ on:
         description: "format %y.%-m.$i or auto"
         required: false
         type: string
+      notice:
+        description: "Notice here"
+        required: false
+        type: string
       prerelease:
         description: "pre release"
         default: false
@@ -24,7 +28,27 @@ on:
         type: boolean
       br_version:
         description: "buildroot version"
-        default: "2023.02.x"
+        default: "2023.08.x"
+        type: string
+      addons_version:
+        description: "addons version"
+        default: ""
+        type: string
+      configs_version:
+        description: "configs version"
+        default: ""
+        type: string
+      modules_version:
+        description: "modules version"
+        default: ""
+        type: string
+      lkm_version:
+        description: "lkm version"
+        default: ""
+        type: string
+      patches_version:
+        description: "patches version"
+        default: ""
         type: string
 
 jobs:
@@ -48,6 +72,11 @@ jobs:
         env:
           REPO: ${{ github.repository }}
 
+      - name: Free Disk Space (Ubuntu)
+        uses: jlumbroso/free-disk-space@main
+        with:
+          swap-storage: false
+
       # Install Dependencies
       - name: Install Dependencies
         run: |
@@ -55,14 +84,8 @@ jobs:
           git config --global user.name "AuxXxilium"
           sudo timedatectl set-timezone "Europe/Berlin"
 
-          # Clean up disk space
-          docker rmi $(docker images -q)
           sudo apt update
-          sudo apt -y purge azure-cli* docker* llvm* google* dotnet* powershell* sphinxsearch* mysql* php* 
-          sudo apt -y full-upgrade
-
-          sudo apt update
-          sudo apt install -y jq gawk libelf-dev qemu-utils
+          sudo apt install -y jq gawk cpio gettext libelf-dev qemu-utils busybox dialog curl sed 
           sudo snap install yq
 
       # calculates the version number and push
@@ -80,7 +103,7 @@ jobs:
               VERSION="`date +'%y.%-m.%-d'`"
             fi
           fi
-
+          
           echo "Version: ${VERSION}"
           echo "VERSION=${VERSION}" >> $GITHUB_ENV
 
@@ -97,11 +120,21 @@ jobs:
           . scripts/func.sh
 
           getExtractor "files/p3/extractor"
-          getLKMs "files/p3/lkms" ${{ inputs.prerelease }}
-          getAddons "files/p3/addons" ${{ inputs.prerelease }}
-          getModules "files/p3/modules" ${{ inputs.prerelease }}
-          getConfigs "files/p3/configs" ${{ inputs.prerelease }}
-          getPatches "files/p3/patches" ${{ inputs.prerelease }}
+          LKMTAG="${{ inputs.lkm_version }}"
+          getLKMs "files/p3/lkms"
+          echo "LKMTAG=${TAG}" >> $GITHUB_ENV
+          ADDONSTAG="${{ inputs.addons_version }}"
+          getAddons "files/p3/addons"
+          echo "ADDONSTAG=${TAG}" >> $GITHUB_ENV
+          MODULESTAG="${{ inputs.modules_version }}"
+          getModules "files/p3/modules"
+          echo "MODULESTAG=${TAG}" >> $GITHUB_ENV
+          CONFIGSTAG="${{ inputs.configs_version }}"
+          getConfigs "files/p3/configs"
+          echo "CONFIGSTAG=${TAG}" >> $GITHUB_ENV
+          PATCHESTAG="${{ inputs.patches_version }}"
+          getPatches "files/p3/patches"
+          echo "PATCHESTAG=${TAG}" >> $GITHUB_ENV
 
           echo "OK"
 
@@ -111,11 +144,12 @@ jobs:
           . scripts/func.sh
 
           echo "Create Arc Image"
-          gzip -dc "files/grub.img.gz" >"arc.img"
-          fdisk -l "arc.img"
+          IMAGE_FILE="arc.img"
+          gzip -dc "files/initrd/opt/arc/grub.img.gz" >"${IMAGE_FILE}"
+          fdisk -l "${IMAGE_FILE}"
           
           LOOPX=$(sudo losetup -f)
-          sudo losetup -P "${LOOPX}" "arc.img"
+          sudo losetup -P "${LOOPX}" "${IMAGE_FILE}"
 
           echo "Mounting Image File"
           mkdir -p "/tmp/p1"
@@ -146,57 +180,69 @@ jobs:
 
           sudo losetup --detach ${LOOPX}
 
-          echo "Create Arc_4GB Image"
-          resizeImg "arc.img" "+3072M" "arc_4GB.img"
+          # echo "Create Arc_4GB Image"
+          # resizeImg "arc.img" "+3072M" "arc_4GB.img"
 
           echo "Image Converter"
           qemu-img convert -O vmdk arc.img arc-dyn.vmdk
           qemu-img convert -O vmdk -o adapter_type=lsilogic arc.img -o subformat=monolithicFlat arc.vmdk
-          qemu-img convert -O vmdk arc_4GB.img arc_4GB-dyn.vmdk
-          qemu-img convert -O vmdk -o adapter_type=lsilogic arc_4GB.img -o subformat=monolithicFlat arc_4GB.vmdk
+          # qemu-img convert -O vmdk arc_4GB.img arc_4GB-dyn.vmdk
+          # qemu-img convert -O vmdk -o adapter_type=lsilogic arc_4GB.img -o subformat=monolithicFlat arc_4GB.vmdk
 
       # Zip image and generate checksum
       - name: Pack
         run: |
           if [ -n "${{ env.VERSION }}" ]; then
             zip -9 "arc-${{ env.VERSION }}.img.zip" arc.img
-            zip -9 "arc_4GB-${{ env.VERSION }}.img.zip" arc_4GB.img
+            # zip -9 "arc_4GB-${{ env.VERSION }}.img.zip" arc_4GB.img
             zip -9 "arc-${{ env.VERSION }}.vmdk-dyn.zip" arc-dyn.vmdk
-            zip -9 "arc_4GB-${{ env.VERSION }}.vmdk-dyn.zip" arc_4GB-dyn.vmdk
+            # zip -9 "arc_4GB-${{ env.VERSION }}.vmdk-dyn.zip" arc_4GB-dyn.vmdk
             zip -9 "arc-${{ env.VERSION }}.vmdk-flat.zip" arc.vmdk arc-flat.vmdk
-            zip -9 "arc_4GB-${{ env.VERSION }}.vmdk-flat.zip" arc_4GB.vmdk arc-flat.vmdk
+            # zip -9 "arc_4GB-${{ env.VERSION }}.vmdk-flat.zip" arc_4GB.vmdk arc-flat.vmdk
           else
             zip -9 "arc.img.zip" arc.img
-            zip -9 "arc_4GB.img.zip" arc_4GB.img
+            # zip -9 "arc_4GB.img.zip" arc_4GB.img
           fi
           zip -9j update.zip "files/p3/bzImage-arc" "files/p3/initrd-arc" "files/p1/ARC-VERSION" "files/p1/boot/grub/grub.cfg"
 
       # Upload artifact
       - name: Upload
-        uses: actions/upload-artifact@v3
-        if: env.VERSION != ''
+        if: success() && env.VERSION == ''
+        uses: actions/upload-artifact@v4
         with:
           name: Images
           path: |
             arc.img.zip
-            arc_4GB.img.zip
+            # arc_4GB.img.zip
             update.zip
           retention-days: 5
 
       # Publish a release if is a tag
       - name: Release
-        uses: softprops/action-gh-release@v1
-        if: env.VERSION != ''
+        if: success() && env.VERSION != ''
+        uses: ncipollo/release-action@v1
         with:
-          tag_name: ${{ env.VERSION }}
+          tag: ${{ env.VERSION }}
           prerelease: ${{ inputs.prerelease }}
+          allowUpdates: true
           body: |
-            ${{ steps.Changelog.outputs.changelog }}
-          files: |
+            Notice:
+              ${{ inputs.notice }}
+
+            Buildroot: ${{ inputs.br_version }}
+            Addons: ${{ env.ADDONSTAG }}
+            Configs: ${{ env.CONFIGSTAG }}
+            Modules: ${{ env.MODULESTAG }}
+            Patches: ${{ env.PATCHESTAG }}
+            LKM: ${{ env.LKMTAG }}
+
+            Changelog:
+              ${{ steps.Changelog.outputs.changelog }}
+          artifacts: |
             arc-${{ env.VERSION }}.img.zip
-            arc_4GB-${{ env.VERSION }}.img.zip
+            # arc_4GB-${{ env.VERSION }}.img.zip
             arc-${{ env.VERSION }}.vmdk-dyn.zip
-            arc_4GB-${{ env.VERSION }}.vmdk-dyn.zip
+            # arc_4GB-${{ env.VERSION }}.vmdk-dyn.zip
             arc-${{ env.VERSION }}.vmdk-flat.zip
-            arc_4GB-${{ env.VERSION }}.vmdk-flat.zip
+            # arc_4GB-${{ env.VERSION }}.vmdk-flat.zip
             update.zip
